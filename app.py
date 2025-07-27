@@ -11,8 +11,9 @@ import io
 import re
 from datetime import datetime
 import requests
-from transformers import pipeline, AutoTokenizer, AutoModelForSeq2SeqLM
+from transformers import pipeline, AutoTokenizer, AutoModelForSeq2SeqLM, AutoModelForCausalLM
 import torch
+import os
 
 # Page configuration
 st.set_page_config(
@@ -224,24 +225,57 @@ setInterval(() => {
 """, unsafe_allow_html=True)
 
 @st.cache_resource
-def get_summarizer():
-    """Initialize the summarization model - optimized for cloud deployment"""
+def get_summarizer(model_choice="BART"):
+    """Initialize the summarization model - supports BART and Llama"""
     try:
-        # Use the smallest, most reliable model for Streamlit Cloud
-        model_name = "facebook/bart-large-cnn"
+        if model_choice == "Llama":
+            # Use Llama 2 7B Chat model for summarization
+            model_name = "meta-llama/Llama-2-7b-chat-hf"
+            
+            # Check if we have access to the model
+            try:
+                tokenizer = AutoTokenizer.from_pretrained(model_name)
+                model = AutoModelForCausalLM.from_pretrained(
+                    model_name,
+                    torch_dtype=torch.float16,
+                    device_map="auto" if torch.cuda.is_available() else "cpu",
+                    load_in_8bit=True if torch.cuda.is_available() else False
+                )
+                
+                # Create a text generation pipeline
+                summarizer = pipeline(
+                    "text-generation",
+                    model=model,
+                    tokenizer=tokenizer,
+                    device_map="auto" if torch.cuda.is_available() else None
+                )
+                
+                return summarizer, "llama"
+                
+            except Exception as llama_error:
+                st.warning(f"Llama model not accessible: {str(llama_error)}")
+                st.info("💡 To use Llama models, you need to:")
+                st.info("1. Accept the license at https://huggingface.co/meta-llama/Llama-2-7b-chat-hf")
+                st.info("2. Add your Hugging Face token to Streamlit secrets")
+                # Fall back to BART
+                model_choice = "BART"
         
-        # Always use CPU for Streamlit Cloud compatibility
-        summarizer = pipeline(
-            "summarization",
-            model=model_name,
-            device=-1,  # Force CPU usage
-            framework="pt"
-        )
-        
-        return summarizer
+        if model_choice == "BART":
+            # Use BART model for summarization
+            model_name = "facebook/bart-large-cnn"
+            
+            summarizer = pipeline(
+                "summarization",
+                model=model_name,
+                device=-1,  # Force CPU usage for Streamlit Cloud
+                framework="pt"
+            )
+            
+            return summarizer, "bart"
+            
     except Exception as e:
-        st.error(f"Error loading model: {str(e)}")
-        # Fallback to a smaller model if the main one fails
+        st.error(f"Error loading {model_choice} model: {str(e)}")
+        # Final fallback to smallest model
         try:
             fallback_model = "sshleifer/distilbart-cnn-6-6"
             summarizer = pipeline(
@@ -251,10 +285,10 @@ def get_summarizer():
                 framework="pt"
             )
             st.warning(f"Using fallback model: {fallback_model}")
-            return summarizer
+            return summarizer, "bart"
         except Exception as e2:
-            st.error(f"Fallback model also failed: {str(e2)}")
-            return None
+            st.error(f"All models failed: {str(e2)}")
+            return None, None
 
 def extract_text_from_pdf(pdf_file):
     """Extract text from a single PDF file"""
@@ -308,6 +342,43 @@ def get_text_stats(text):
     sentences = len(re.findall(r'[.!?]+', text))
     return words, chars, sentences
 
+def create_llama_summary(text, summarizer, target_length):
+    """Create summary using Llama model"""
+    try:
+        # Create a prompt for Llama to summarize
+        if target_length == "short":
+            length_instruction = "in 3-5 sentences"
+        elif target_length == "medium":
+            length_instruction = "in 5-8 sentences"
+        else:
+            length_instruction = "in 8-12 sentences"
+        
+        prompt = f"""<s>[INST] Please summarize the following text {length_instruction}. Focus on the main points and key information:
+
+{text[:2000]}  # Limit text length for Llama
+
+[/INST]"""
+        
+        # Generate summary
+        response = summarizer(
+            prompt,
+            max_length=len(prompt.split()) + 200,
+            num_return_sequences=1,
+            temperature=0.7,
+            do_sample=True,
+            pad_token_id=summarizer.tokenizer.eos_token_id
+        )
+        
+        # Extract the summary from the response
+        full_response = response[0]['generated_text']
+        summary = full_response.split('[/INST]')[-1].strip()
+        
+        return summary
+        
+    except Exception as e:
+        st.error(f"Error with Llama summarization: {str(e)}")
+        return None
+
 def create_comprehensive_summary(text, target_length):
     """Create a comprehensive summary using rule-based extraction"""
     sentences = re.split(r'[.!?]+', text)
@@ -360,13 +431,21 @@ def main():
     st.markdown("""
     <div class="main-header">
         <h1>🔒 AI PDF Summarizer</h1>
-        <p>Secure • Local • No API Keys Required</p>
+        <p>Secure • Local • BART + Llama Models • No API Keys Required</p>
     </div>
     """, unsafe_allow_html=True)
     
     # Sidebar
     with st.sidebar:
         st.header("⚙️ Settings")
+        
+        # Model selection
+        model_choice = st.selectbox(
+            "🤖 AI Model",
+            ["BART", "Llama"],
+            index=0,
+            help="Choose the AI model for summarization"
+        )
         
         # Summary length selection
         summary_length = st.selectbox(
@@ -377,14 +456,27 @@ def main():
         )
         
         # Model info
-        st.header("🤖 AI Model")
-        st.markdown("""
-        **Current Model**: DistilBART-CNN-12-6
-        - ✅ Fast processing (10-30 seconds)
-        - ✅ Good quality summaries
-        - ✅ Optimized for cloud deployment
-        - ✅ No API keys required
-        """)
+        st.header("🤖 AI Model Info")
+        if model_choice == "BART":
+            st.markdown("""
+            **BART Model**: facebook/bart-large-cnn
+            - ✅ Fast processing (10-30 seconds)
+            - ✅ Excellent for news/documents
+            - ✅ Optimized for cloud deployment
+            - ✅ No API keys required
+            """)
+        else:
+            st.markdown("""
+            **Llama Model**: meta-llama/Llama-2-7b-chat-hf
+            - 🚀 Advanced conversational AI
+            - 🎯 Superior context understanding
+            - 💡 Requires Hugging Face access
+            - ⚡ Longer processing time
+            """)
+            
+            st.info("💡 **To use Llama:**")
+            st.info("1. Accept license at [Hugging Face](https://huggingface.co/meta-llama/Llama-2-7b-chat-hf)")
+            st.info("2. Add HF token to Streamlit secrets")
         
         # Confidential data info
         st.markdown("""
@@ -481,89 +573,108 @@ def main():
                 }
                 
                 # Create comprehensive summary
-                st.info("🤖 Creating comprehensive summary...")
+                st.info(f"🤖 Creating comprehensive summary using {model_choice} model...")
                 
-                # First try comprehensive extraction for shorter documents
-                comprehensive_summary = create_comprehensive_summary(text, target_length)
+                # Get the selected model
+                summarizer, model_type = get_summarizer(model_choice)
                 
-                if comprehensive_summary and len(text.split()) < 1000:
-                    final_summary = comprehensive_summary
-                    st.success("✨ Used intelligent extraction preserving all critical information")
+                if not summarizer:
+                    st.error("❌ Could not load summarization model")
+                    return
+                
+                # First try comprehensive extraction for shorter documents (only for BART)
+                if model_choice == "BART" and len(text.split()) < 1000:
+                    comprehensive_summary = create_comprehensive_summary(text, target_length)
+                    if comprehensive_summary:
+                        final_summary = comprehensive_summary
+                        st.success("✨ Used intelligent extraction preserving all critical information")
+                    else:
+                        # Use BART AI summarization
+                        final_summary = None
                 else:
-                    # Use AI summarization
-                    summarizer = get_summarizer()
-                    
-                    if not summarizer:
-                        st.error("❌ Could not load summarization model")
-                        return
-                    
+                    final_summary = None
+                
+                if not final_summary:
                     params = length_params[summary_length]
                     
-                    # Split into chunks for processing
-                    chunks = chunk_text(text, max_tokens=800)
-                    
-                    if len(chunks) == 1:
-                        # Single chunk - direct summarization
+                    if model_type == "llama":
+                        # Use Llama for summarization
                         try:
-                            final_summary = summarizer(
-                                chunks[0], 
-                                max_length=params["max_length"], 
-                                min_length=params["min_length"], 
-                                do_sample=False
-                            )[0]['summary_text']
+                            final_summary = create_llama_summary(text, summarizer, target_length)
+                            if not final_summary:
+                                st.error("❌ Llama summarization failed")
+                                return
                         except Exception as e:
-                            st.error(f"❌ Summarization failed: {str(e)}")
+                            st.error(f"❌ Llama summarization error: {str(e)}")
                             return
+                    
                     else:
-                        # Multiple chunks
-                        progress_bar = st.progress(0)
-                        status_text = st.empty()
+                        # Use BART for summarization
+                        # Split into chunks for processing
+                        chunks = chunk_text(text, max_tokens=800)
                         
-                        chunk_summaries = []
-                        for i, chunk in enumerate(chunks):
-                            status_text.text(f"Processing section {i + 1} of {len(chunks)}")
-                            try:
-                                chunk_max_length = min(200, len(chunk.split()) // 2)
-                                chunk_min_length = min(100, chunk_max_length // 2)
-                                
-                                chunk_summary = summarizer(
-                                    chunk, 
-                                    max_length=chunk_max_length,
-                                    min_length=chunk_min_length, 
-                                    do_sample=False
-                                )[0]['summary_text']
-                                chunk_summaries.append(chunk_summary)
-                            except Exception as e:
-                                st.warning(f"⚠️ Error processing chunk {i+1}: {str(e)}")
-                                continue
-                            
-                            progress_bar.progress((i + 1) / len(chunks))
-                        
-                        progress_bar.empty()
-                        status_text.empty()
-                        
-                        if not chunk_summaries:
-                            st.error("❌ Could not process any chunks")
-                            return
-                        
-                        # Combine chunk summaries
-                        combined_summaries = "\n\n".join(chunk_summaries)
-                        
-                        # Final summarization if needed
-                        if len(combined_summaries.split()) > params["max_length"] * 1.5:
-                            st.info("🔄 Creating final comprehensive summary...")
+                        if len(chunks) == 1:
+                            # Single chunk - direct summarization
                             try:
                                 final_summary = summarizer(
-                                    combined_summaries, 
+                                    chunks[0], 
                                     max_length=params["max_length"], 
                                     min_length=params["min_length"], 
                                     do_sample=False
                                 )[0]['summary_text']
                             except Exception as e:
-                                st.warning(f"⚠️ Final summarization failed, using combined summaries: {str(e)}")
-                                final_summary = combined_summaries
+                                st.error(f"❌ BART summarization failed: {str(e)}")
+                                return
                         else:
-                            final_summary = combined_summaries
+                            # Multiple chunks
+                            progress_bar = st.progress(0)
+                            status_text = st.empty()
+                            
+                            chunk_summaries = []
+                            for i, chunk in enumerate(chunks):
+                                status_text.text(f"Processing section {i + 1} of {len(chunks)}")
+                                try:
+                                    chunk_max_length = min(200, len(chunk.split()) // 2)
+                                    chunk_min_length = min(100, chunk_max_length // 2)
+                                    
+                                    chunk_summary = summarizer(
+                                        chunk, 
+                                        max_length=chunk_max_length,
+                                        min_length=chunk_min_length, 
+                                        do_sample=False
+                                    )[0]['summary_text']
+                                    chunk_summaries.append(chunk_summary)
+                                except Exception as e:
+                                    st.warning(f"⚠️ Error processing chunk {i+1}: {str(e)}")
+                                    continue
+                                
+                                progress_bar.progress((i + 1) / len(chunks))
+                            
+                            progress_bar.empty()
+                            status_text.empty()
+                            
+                            if not chunk_summaries:
+                                st.error("❌ Could not process any chunks")
+                                return
+                            
+                            # Combine chunk summaries
+                            combined_summaries = "\n\n".join(chunk_summaries)
+                            
+                            # Final summarization if needed
+                            if len(combined_summaries.split()) > params["max_length"] * 1.5:
+                                st.info("🔄 Creating final comprehensive summary...")
+                                try:
+                                    final_summary = summarizer(
+                                        combined_summaries, 
+                                        max_length=params["max_length"], 
+                                        min_length=params["min_length"], 
+                                        do_sample=False
+                                    )[0]['summary_text']
+                                except Exception as e:
+                                    st.warning(f"⚠️ Final summarization failed, using combined summaries: {str(e)}")
+                                    final_summary = combined_summaries
+                            else:
+                                final_summary = combined_summaries
                 
                 # Processing time
                 end_time = datetime.now()
