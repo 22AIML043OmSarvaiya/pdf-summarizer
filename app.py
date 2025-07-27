@@ -227,24 +227,34 @@ setInterval(() => {
 def get_summarizer():
     """Initialize the summarization model - optimized for cloud deployment"""
     try:
-        # Use a smaller, faster model for cloud deployment
-        model_name = "sshleifer/distilbart-cnn-12-6"
+        # Use the smallest, most reliable model for Streamlit Cloud
+        model_name = "facebook/bart-large-cnn"
         
-        # Check if CUDA is available, but don't require it
-        device = 0 if torch.cuda.is_available() else -1
-        
+        # Always use CPU for Streamlit Cloud compatibility
         summarizer = pipeline(
             "summarization",
             model=model_name,
-            tokenizer=model_name,
-            device=device,
+            device=-1,  # Force CPU usage
             framework="pt"
         )
         
         return summarizer
     except Exception as e:
         st.error(f"Error loading model: {str(e)}")
-        return None
+        # Fallback to a smaller model if the main one fails
+        try:
+            fallback_model = "sshleifer/distilbart-cnn-6-6"
+            summarizer = pipeline(
+                "summarization",
+                model=fallback_model,
+                device=-1,
+                framework="pt"
+            )
+            st.warning(f"Using fallback model: {fallback_model}")
+            return summarizer
+        except Exception as e2:
+            st.error(f"Fallback model also failed: {str(e2)}")
+            return None
 
 def extract_text_from_pdf(pdf_file):
     """Extract text from a single PDF file"""
