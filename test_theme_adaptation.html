@@ -1,0 +1,173 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Theme Adaptation Test</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 20px;
+            transition: all 0.3s ease;
+        }
+        
+        .theme-toggle {
+            margin-bottom: 20px;
+        }
+        
+        button {
+            padding: 10px 20px;
+            margin: 5px;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            background: #667eea;
+            color: white;
+        }
+        
+        .test-section {
+            margin: 20px 0;
+            padding: 20px;
+            border-radius: 10px;
+            border: 2px solid #ccc;
+        }
+        
+        /* Light theme (default) */
+        body.light {
+            background: white;
+            color: #333;
+        }
+        
+        body.light .test-section {
+            background: #f8f9fa;
+            border-color: #dee2e6;
+            color: #333;
+        }
+        
+        /* Dark theme */
+        body.dark {
+            background: rgb(14, 17, 23);
+            color: #e2e8f0;
+        }
+        
+        body.dark .test-section {
+            background: #2d3748;
+            border-color: #4a5568;
+            color: #e2e8f0;
+        }
+        
+        .status {
+            padding: 10px;
+            margin: 10px 0;
+            border-radius: 5px;
+            font-weight: bold;
+        }
+        
+        .status.light {
+            background: #d4edda;
+            color: #155724;
+            border: 1px solid #c3e6cb;
+        }
+        
+        .status.dark {
+            background: #2d3748;
+            color: #e2e8f0;
+            border: 1px solid #4a5568;
+        }
+    </style>
+</head>
+<body class="light">
+    <h1>🎨 Theme Adaptation Test</h1>
+    
+    <div class="theme-toggle">
+        <button onclick="setTheme('light')">☀️ Light Theme</button>
+        <button onclick="setTheme('dark')">🌙 Dark Theme</button>
+        <button onclick="setTheme('auto')">🔄 Auto (System)</button>
+    </div>
+    
+    <div id="status" class="status light">
+        Current Theme: Light
+    </div>
+    
+    <div class="test-section">
+        <h3>📁 Upload Your PDF Files</h3>
+        <p>This section should adapt to the current theme:</p>
+        <ul>
+            <li><strong>Light Theme:</strong> Light gray background (#f8f9fa)</li>
+            <li><strong>Dark Theme:</strong> Dark gray background (#2d3748)</li>
+        </ul>
+    </div>
+    
+    <div class="test-section">
+        <h3>✨ Features</h3>
+        <p>This section should also adapt properly:</p>
+        <ul>
+            <li><strong>Light Theme:</strong> Light blue background (#e3f2fd)</li>
+            <li><strong>Dark Theme:</strong> Dark gray background (#2d3748)</li>
+        </ul>
+    </div>
+    
+    <div class="test-section">
+        <h3>📄 Summary Box</h3>
+        <p>Summary content should be readable in both themes:</p>
+        <ul>
+            <li><strong>Light Theme:</strong> White background with dark text</li>
+            <li><strong>Dark Theme:</strong> Dark background with light text</li>
+        </ul>
+    </div>
+    
+    <h2>🧪 Test Instructions:</h2>
+    <ol>
+        <li><strong>Click the theme buttons above</strong> to switch between themes</li>
+        <li><strong>Observe the color changes</strong> - they should be smooth and appropriate</li>
+        <li><strong>Check text readability</strong> - text should always be clearly visible</li>
+        <li><strong>Compare with your Streamlit app</strong> - it should behave similarly</li>
+    </ol>
+    
+    <h2>✅ Expected Behavior:</h2>
+    <ul>
+        <li>🌞 <strong>Light Theme:</strong> Light backgrounds, dark text, good contrast</li>
+        <li>🌙 <strong>Dark Theme:</strong> Dark backgrounds, light text, good contrast</li>
+        <li>🔄 <strong>Smooth Transitions:</strong> No jarring color changes</li>
+        <li>📱 <strong>Auto Theme:</strong> Follows your system preference</li>
+    </ul>
+    
+    <script>
+        function setTheme(theme) {
+            const body = document.body;
+            const status = document.getElementById('status');
+            
+            if (theme === 'light') {
+                body.className = 'light';
+                status.className = 'status light';
+                status.textContent = 'Current Theme: Light';
+            } else if (theme === 'dark') {
+                body.className = 'dark';
+                status.className = 'status dark';
+                status.textContent = 'Current Theme: Dark';
+            } else if (theme === 'auto') {
+                const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+                if (prefersDark) {
+                    body.className = 'dark';
+                    status.className = 'status dark';
+                    status.textContent = 'Current Theme: Auto (Dark)';
+                } else {
+                    body.className = 'light';
+                    status.className = 'status light';
+                    status.textContent = 'Current Theme: Auto (Light)';
+                }
+            }
+        }
+        
+        // Listen for system theme changes
+        window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', (e) => {
+            if (document.body.className === 'auto') {
+                setTheme('auto');
+            }
+        });
+        
+        // Set initial theme based on system preference
+        setTheme('auto');
+    </script>
+</body>
+</html>
