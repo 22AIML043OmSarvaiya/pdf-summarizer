@@ -226,42 +226,32 @@ setInterval(() => {
 
 @st.cache_resource
 def get_summarizer(model_choice="BART"):
-    """Initialize the summarization model - supports BART and Llama"""
+    """Initialize the summarization model - supports BART with optional Llama"""
     try:
-        if model_choice == "Llama":
-            # Use Llama 2 7B Chat model for summarization
-            model_name = "meta-llama/Llama-2-7b-chat-hf"
-            
-            # Check if we have access to the model
+        if model_choice == "Conversational AI":
+            # Try to use Llama model if available
+            st.info("🤖 Attempting to load conversational AI model...")
             try:
-                tokenizer = AutoTokenizer.from_pretrained(model_name)
-                model = AutoModelForCausalLM.from_pretrained(
-                    model_name,
-                    torch_dtype=torch.float16,
-                    device_map="auto" if torch.cuda.is_available() else "cpu",
-                    load_in_8bit=True if torch.cuda.is_available() else False
-                )
+                # Try to load conversational model
+                model_name = "microsoft/DialoGPT-medium"
                 
-                # Create a text generation pipeline
                 summarizer = pipeline(
                     "text-generation",
-                    model=model,
-                    tokenizer=tokenizer,
-                    device_map="auto" if torch.cuda.is_available() else None
+                    model=model_name,
+                    device=-1,
+                    framework="pt"
                 )
                 
+                st.success("✅ Loaded conversational AI model")
                 return summarizer, "llama"
                 
-            except Exception as llama_error:
-                st.warning(f"Llama model not accessible: {str(llama_error)}")
-                st.info("💡 To use Llama models, you need to:")
-                st.info("1. Accept the license at https://huggingface.co/meta-llama/Llama-2-7b-chat-hf")
-                st.info("2. Add your Hugging Face token to Streamlit secrets")
-                # Fall back to BART
+            except Exception as conv_error:
+                st.warning(f"⚠️ Conversational AI model not accessible: {str(conv_error)}")
+                st.info("💡 Using BART model instead for reliable performance")
                 model_choice = "BART"
         
+        # Use BART model (default and fallback)
         if model_choice == "BART":
-            # Use BART model for summarization
             model_name = "facebook/bart-large-cnn"
             
             summarizer = pipeline(
@@ -343,41 +333,43 @@ def get_text_stats(text):
     return words, chars, sentences
 
 def create_llama_summary(text, summarizer, target_length):
-    """Create summary using Llama model"""
+    """Create summary using conversational AI model"""
     try:
-        # Create a prompt for Llama to summarize
+        # Create a prompt for conversational summarization
         if target_length == "short":
-            length_instruction = "in 3-5 sentences"
+            length_instruction = "briefly in 3-5 sentences"
         elif target_length == "medium":
             length_instruction = "in 5-8 sentences"
         else:
-            length_instruction = "in 8-12 sentences"
+            length_instruction = "comprehensively in 8-12 sentences"
         
-        prompt = f"""<s>[INST] Please summarize the following text {length_instruction}. Focus on the main points and key information:
-
-{text[:2000]}  # Limit text length for Llama
-
-[/INST]"""
+        # Simple prompt for DialoGPT
+        prompt = f"Summarize this text {length_instruction}: {text[:1500]}"
         
         # Generate summary
         response = summarizer(
             prompt,
-            max_length=len(prompt.split()) + 200,
+            max_length=len(prompt.split()) + 150,
             num_return_sequences=1,
             temperature=0.7,
             do_sample=True,
-            pad_token_id=summarizer.tokenizer.eos_token_id
+            pad_token_id=summarizer.tokenizer.eos_token_id if hasattr(summarizer.tokenizer, 'eos_token_id') else 50256
         )
         
         # Extract the summary from the response
         full_response = response[0]['generated_text']
-        summary = full_response.split('[/INST]')[-1].strip()
+        # Remove the original prompt from the response
+        summary = full_response.replace(prompt, "").strip()
+        
+        # If summary is too short, fall back to rule-based
+        if len(summary.split()) < 10:
+            return create_comprehensive_summary(text, target_length.split()[0].lower())
         
         return summary
         
     except Exception as e:
-        st.error(f"Error with Llama summarization: {str(e)}")
-        return None
+        st.warning(f"Conversational AI error: {str(e)}, falling back to rule-based summary")
+        return create_comprehensive_summary(text, target_length.split()[0].lower())
 
 def create_comprehensive_summary(text, target_length):
     """Create a comprehensive summary using rule-based extraction"""
@@ -431,7 +423,7 @@ def main():
     st.markdown("""
     <div class="main-header">
         <h1>🔒 AI PDF Summarizer</h1>
-        <p>Secure • Local • BART + Llama Models • No API Keys Required</p>
+        <p>Secure • Local • Multiple AI Models • No API Keys Required</p>
     </div>
     """, unsafe_allow_html=True)
     
@@ -442,7 +434,7 @@ def main():
         # Model selection
         model_choice = st.selectbox(
             "🤖 AI Model",
-            ["BART", "Llama"],
+            ["BART", "Conversational AI"],
             index=0,
             help="Choose the AI model for summarization"
         )
@@ -467,16 +459,14 @@ def main():
             """)
         else:
             st.markdown("""
-            **Llama Model**: meta-llama/Llama-2-7b-chat-hf
-            - 🚀 Advanced conversational AI
-            - 🎯 Superior context understanding
-            - 💡 Requires Hugging Face access
-            - ⚡ Longer processing time
+            **Conversational AI**: microsoft/DialoGPT-medium
+            - 🤖 Conversational approach to summarization
+            - 🎯 Different perspective on content
+            - ✅ Works on Streamlit Cloud
+            - 🔄 Falls back to rule-based if needed
             """)
             
-            st.info("💡 **To use Llama:**")
-            st.info("1. Accept license at [Hugging Face](https://huggingface.co/meta-llama/Llama-2-7b-chat-hf)")
-            st.info("2. Add HF token to Streamlit secrets")
+            st.info("💡 **Note:** This uses a conversational AI model as an alternative approach to summarization.")
         
         # Confidential data info
         st.markdown("""
